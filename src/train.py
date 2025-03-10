@@ -7,152 +7,221 @@ import time
 import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from config.model_config import ModelConfig
 from config.training_config import TrainingConfig
-from data.dataloader import get_batch, estimate_loss, prepare_data
+from data.dataloader import prepare_data
 from data.tokenizer import get_tokenizer
 from models import GPT
 from utils.io import load_checkpoint, save_checkpoint
 from utils.distributed import setup_distributed, cleanup_distributed, get_optimizer
 
-def train(
-    model_config: ModelConfig = None,
-    training_config: TrainingConfig = None,
-    train_data: Dataset = None,
-    val_data: Dataset = None,
-    model: GPT = None,
-    optimizer: torch.optim.Optimizer = None,
-    device: str = None,
-    rank: int = 0,
-    world_size: int = 1,
-    ddp: bool = False,
-    wandb_run = None
-):
-    """
-    Train the GPT model.
+class Trainer:
+    """Class for training GPT models."""
     
-    Args:
-        model_config: Model configuration. If None, loads from config/model_config.py
-        training_config: Training configuration. If None, loads from config/training_config.py
-        train_data: Training dataset. If None, loads from config/data_config.py
-        val_data: Validation dataset. If None, loads from config/data_config.py
-        model: Pre-initialized model. If None, creates new model
-        optimizer: Pre-initialized optimizer. If None, creates new optimizer
-        device: Device to train on. If None, uses CUDA if available
-        rank: Process rank for distributed training
-        world_size: Total number of processes for distributed training
-        ddp: Whether to use distributed training
-        wandb_run: Weights & Biases run object for logging
-    """
-    # Load configurations if not provided
-    if model_config is None:
-        model_config = ModelConfig()
-    if training_config is None:
-        training_config = TrainingConfig()
-    if device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
-    # Set up distributed training if enabled
-    if ddp:
-        setup_distributed(rank, world_size)
-    
-    # Prepare data if not provided
-    if train_data is None or val_data is None:
-        train_data, val_data = prepare_data(training_config)
-    
-    # Initialize model if not provided
-    if model is None:
-        model = GPT(model_config)
-        model = model.to(device)
+    def __init__(
+        self,
+        model_config: ModelConfig = None,
+        training_config: TrainingConfig = None,
+        train_data: Dataset = None,
+        val_data: Dataset = None,
+        model: GPT = None,
+        optimizer: torch.optim.Optimizer = None,
+        device: str = None,
+        rank: int = 0,
+        world_size: int = 1,
+        ddp: bool = False,
+        wandb_run = None
+    ):
+        """
+        Initialize the trainer.
+        
+        Args:
+            model_config: Model configuration. If None, loads from config/model_config.py
+            training_config: Training configuration. If None, loads from config/training_config.py
+            train_data: Training dataset. If None, loads from config/data_config.py
+            val_data: Validation dataset. If None, loads from config/data_config.py
+            model: Pre-initialized model. If None, creates new model
+            optimizer: Pre-initialized optimizer. If None, creates new optimizer
+            device: Device to train on. If None, uses CUDA if available
+            rank: Process rank for distributed training
+            world_size: Total number of processes for distributed training
+            ddp: Whether to use distributed training
+            wandb_run: Weights & Biases run object for logging
+        """
+        # Load configurations if not provided
+        self.model_config = model_config or ModelConfig()
+        self.training_config = training_config or TrainingConfig()
+        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.rank = rank
+        self.world_size = world_size
+        self.ddp = ddp
+        self.wandb_run = wandb_run
+        
+        # Set up distributed training if enabled
         if ddp:
-            model = DDP(model, device_ids=[rank])
-    
-    # Create optimizer if not provided
-    if optimizer is None:
-        optimizer = get_optimizer(model, training_config)
-    
-    # Load checkpoint if exists
-    best_val_loss = float('inf')
-    start_iter = 0
-    if os.path.exists(os.path.join(training_config.out_dir, 'ckpt.pt')):
-        checkpoint = load_checkpoint(training_config)
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        start_iter = checkpoint['iter_num']
-        best_val_loss = checkpoint['best_val_loss']
-    
-    # Training loop
-    model.train()
-    X, Y = get_batch(train_data, training_config.batch_size, training_config.block_size, device)
-    t0 = time.time()
-    local_iter_num = 0
-    running_mfu = -1.0
-    
-    while True:
-        # Determine and set the learning rate for this iteration
-        lr = get_lr(training_config, start_iter + local_iter_num) if training_config.decay_lr else training_config.learning_rate
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+            setup_distributed(rank, world_size)
         
-        # Evaluate the loss on train/val sets and write checkpoints
-        if local_iter_num % training_config.eval_interval == 0:
-            losses = estimate_loss(model, train_data, val_data, training_config, device)
-            print(f"step {local_iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-            if wandb_run:
-                wandb_run.log({
-                    'train/loss': losses['train'],
-                    'val/loss': losses['val'],
-                    'lr': lr,
-                    'mfu': running_mfu*100, # convert to percentage
-                })
-            if losses['val'] < best_val_loss or training_config.always_save_checkpoint:
-                best_val_loss = losses['val']
-                if local_iter_num > 0:
-                    save_checkpoint(model, optimizer, training_config)
+        # Prepare data if not provided
+        if train_data is None or val_data is None:
+            self.train_data, self.val_data = prepare_data(self.training_config)
+        else:
+            self.train_data = train_data
+            self.val_data = val_data
         
-        # Forward backward update, with optional gradient accumulation to simulate larger batch size
-        for micro_step in range(training_config.gradient_accumulation_steps):
-            # Forward pass
-            logits, loss = model(X, Y)
-            loss = loss / training_config.gradient_accumulation_steps # scale the loss to account for gradient accumulation
-            loss.backward()
-            if training_config.grad_clip != 0.0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), training_config.grad_clip)
-            optimizer.step()
+        # Initialize model if not provided
+        if model is None:
+            self.model = GPT(self.model_config)
+            self.model = self.model.to(self.device)
+            if ddp:
+                self.model = DDP(self.model, device_ids=[rank])
+        else:
+            self.model = model
         
-        # Timing and logging
-        t1 = time.time()
-        dt = t1 - t0
-        t0 = t1
-        if local_iter_num % training_config.log_interval == 0:
-            lossf = loss.item() * training_config.gradient_accumulation_steps
-            print(f"iter {local_iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
+        # Create optimizer if not provided
+        if optimizer is None:
+            self.optimizer = get_optimizer(self.model, self.training_config)
+        else:
+            self.optimizer = optimizer
         
-        # Timing and logging
-        t1 = time.time()
-        dt = t1 - t0
-        t0 = t1
-        if local_iter_num % training_config.log_interval == 0:
-            # Get loss as float. note: this is a CPU-GPU sync point
-            # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
-            lossf = loss.item() * training_config.gradient_accumulation_steps
-            print(f"iter {local_iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
-            # Check if we should stop training
-            if training_config.max_iters is not None and local_iter_num >= training_config.max_iters:
-                break
+        # Load checkpoint if exists
+        self.best_val_loss = float('inf')
+        self.start_iter = 0
+        if os.path.exists(os.path.join(self.training_config.out_dir, 'ckpt.pt')):
+            checkpoint = load_checkpoint(self.training_config)
+            self.model.load_state_dict(checkpoint['model'])
+            self.optimizer.load_state_dict(checkpoint['optimizer'])
+            self.start_iter = checkpoint['iter_num']
+            self.best_val_loss = checkpoint['best_val_loss']
     
-    # Clean up distributed training
-    if ddp:
-        cleanup_distributed()
+    def get_batch(self, data: Dataset, batch_size: int, block_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get a batch of data from the dataset.
+        
+        Args:
+            data: Dataset to get batch from
+            batch_size: Size of the batch
+            block_size: Size of each sequence in the batch
+            
+        Returns:
+            Tuple of (input tensor, target tensor)
+        """
+        # Generate a small batch of data of inputs x and targets y
+        ix = torch.randint(len(data) - block_size, (batch_size,))
+        x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
+        y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
+        x, y = x.to(self.device), y.to(self.device)
+        return x, y
     
-    return model, optimizer, best_val_loss
+    def estimate_loss(self, model: GPT, train_data: Dataset, val_data: Dataset) -> dict:
+        """
+        Estimate the loss on train and validation sets.
+        
+        Args:
+            model: Model to evaluate
+            train_data: Training dataset
+            val_data: Validation dataset
+            
+        Returns:
+            Dictionary containing train and validation losses
+        """
+        out = {}
+        model.eval()
+        for split in ['train', 'val']:
+            losses = torch.zeros(self.training_config.eval_iters)
+            for k in range(self.training_config.eval_iters):
+                X, Y = self.get_batch(
+                    train_data if split == 'train' else val_data,
+                    self.training_config.batch_size,
+                    self.training_config.block_size
+                )
+                with torch.no_grad():
+                    logits, loss = model(X, Y)
+                losses[k] = loss.item()
+            out[split] = losses.mean()
+        model.train()
+        return out
+    
+    def train(self) -> Tuple[GPT, torch.optim.Optimizer, float]:
+        """
+        Train the model.
+        
+        Returns:
+            Tuple of (model, optimizer, best_val_loss)
+        """
+        # Training loop
+        self.model.train()
+        X, Y = self.get_batch(self.train_data, self.training_config.batch_size, self.training_config.block_size)
+        t0 = time.time()
+        local_iter_num = 0
+        running_mfu = -1.0
+        
+        # Calculate total iterations
+        total_iters = self.training_config.max_iters if self.training_config.max_iters is not None else float('inf')
+        
+        for local_iter_num in range(total_iters):
+            # Determine and set the learning rate for this iteration
+            lr = get_lr(self.training_config, self.start_iter + local_iter_num) if self.training_config.decay_lr else self.training_config.learning_rate
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = lr
+            
+            # Evaluate the loss on train/val sets and write checkpoints
+            if local_iter_num % self.training_config.eval_interval == 0:
+                losses = self.estimate_loss(self.model, self.train_data, self.val_data)
+                print(f"step {local_iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+                if self.wandb_run:
+                    self.wandb_run.log({
+                        'train/loss': losses['train'],
+                        'val/loss': losses['val'],
+                        'lr': lr,
+                        'mfu': running_mfu*100, # convert to percentage
+                    })
+                if losses['val'] < self.best_val_loss or self.training_config.always_save_checkpoint:
+                    self.best_val_loss = losses['val']
+                    if local_iter_num > 0:
+                        self.model.save(self.optimizer, self.training_config)
+            
+            # Forward backward update, with optional gradient accumulation to simulate larger batch size
+            for micro_step in range(self.training_config.gradient_accumulation_steps):
+                # Forward pass
+                logits, loss = self.model(X, Y)
+                loss = loss / self.training_config.gradient_accumulation_steps # scale the loss to account for gradient accumulation
+                loss.backward()
+                if self.training_config.grad_clip != 0.0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.training_config.grad_clip)
+                self.optimizer.step()
+            
+            # Timing and logging
+            t1 = time.time()
+            dt = t1 - t0
+            t0 = t1
+            if local_iter_num % self.training_config.log_interval == 0:
+                lossf = loss.item() * self.training_config.gradient_accumulation_steps
+                print(f"iter {local_iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
+        
+        # Clean up distributed training
+        if self.ddp:
+            cleanup_distributed()
+        
+        return self.model, self.optimizer, self.best_val_loss
 
-if __name__ == '__main__':
-    # Example usage
+def main():
+    """Example usage of the Trainer class."""
+    # Create configurations
     model_config = ModelConfig()
     training_config = TrainingConfig()
-    model, optimizer, best_val_loss = train(model_config, training_config)
-    print(f"Training completed. Best validation loss: {best_val_loss:.4f}") 
+    
+    # Create trainer
+    trainer = Trainer(
+        model_config=model_config,
+        training_config=training_config
+    )
+    
+    # Train the model
+    model, optimizer, best_val_loss = trainer.train()
+    print(f"Training completed. Best validation loss: {best_val_loss:.4f}")
+
+if __name__ == '__main__':
+    main() 

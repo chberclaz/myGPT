@@ -1,6 +1,6 @@
-# TradeGPT
+# nanoGPT
 
-A PyTorch implementation of GPT for prediction, based on the [nanoGPT](https://github.com/karpathy/nanoGPT) project by Andrej Karpathy.
+A PyTorch implementation of GPT for text generation, based on the [nanoGPT](https://github.com/karpathy/nanoGPT) project by Andrej Karpathy.
 
 ## Features
 
@@ -9,9 +9,10 @@ A PyTorch implementation of GPT for prediction, based on the [nanoGPT](https://g
 - Mixed precision training with FP16
 - Gradient accumulation for large batch sizes
 - Learning rate scheduling with cosine decay
-- Checkpointing and model saving
+- Built-in model saving and loading
 - Text generation with various sampling strategies (temperature, top-k, top-p)
 - Support for multiple datasets (Shakespeare, custom datasets)
+- Comprehensive logging and experiment tracking with Weights & Biases
 
 ## Project Structure
 
@@ -19,12 +20,23 @@ A PyTorch implementation of GPT for prediction, based on the [nanoGPT](https://g
 nanoGPT/
 ├── src/
 │   ├── config/           # Configuration files
-│   ├── data/            # Data loading and preprocessing
-│   ├── models/          # Model architecture
-│   └── utils/           # Utility functions
-├── data/                # Dataset storage
-├── checkpoints/         # Model checkpoints
-└── requirements.txt     # Project dependencies
+│   │   ├── model_config.py    # Model architecture configuration
+│   │   └── training_config.py # Training hyperparameters
+│   ├── data/            # Data handling
+│   │   ├── dataloader.py      # Data loading utilities
+│   │   └── tokenizer.py       # Text tokenization
+│   ├── models/          # Model implementation
+│   │   └── gpt.py            # GPT model architecture
+│   ├── utils/           # Utility functions
+│   │   ├── distributed.py    # Distributed training setup
+│   │   └── io.py            # Checkpoint saving/loading
+│   ├── train.py         # Main training script
+│   ├── generate.py      # Text generation script
+│   └── save_model.py    # Example usage scripts
+├── data/               # Dataset storage
+├── out/               # Model checkpoints and outputs
+├── requirements.txt   # Project dependencies
+└── README.md         # This file
 ```
 
 ## Installation
@@ -36,7 +48,7 @@ git clone https://github.com/yourusername/nanoGPT.git
 cd nanoGPT
 ```
 
-2. Create a virtual environment and activate it:
+2. Create a virtual environment (recommended):
 
 ```bash
 python -m venv venv
@@ -51,135 +63,106 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Training
+### Training a Model
 
-You can train the model in two ways:
-
-1. Using the command line:
-
-```bash
-python src/train.py
-```
-
-2. Using the modular training function in your code:
+The project provides a `Trainer` class that handles the entire training process:
 
 ```python
-from src.train import train
 from src.config.model_config import ModelConfig
 from src.config.training_config import TrainingConfig
+from src.train import Trainer
 
 # Create configurations
 model_config = ModelConfig()
 training_config = TrainingConfig()
 
-# Train the model
-model, optimizer, best_val_loss = train(
+# Create trainer
+trainer = Trainer(
     model_config=model_config,
-    training_config=training_config,
-    # Optional parameters:
-    # train_data=your_train_data,
-    # val_data=your_val_data,
-    # device='cuda',
-    # ddp=False,
-    # wandb_run=your_wandb_run
+    training_config=training_config
 )
 
-print(f"Training completed. Best validation loss: {best_val_loss:.4f}")
+# Train the model
+model, optimizer, best_val_loss = trainer.train()
 ```
 
-### Text Generation
+### Generating Text
 
-You can generate text in two ways:
-
-1. Using the command line:
-
-```bash
-python src/generate.py
-```
-
-2. Using the modular generation function in your code:
+Use the `Generator` class to generate text from a trained model:
 
 ```python
-from src.generate import generate_text
-from src.config.model_config import ModelConfig
-from src.config.training_config import TrainingConfig
+from src.generate import Generator
 
-# Generate text with default settings
-text = generate_text("Once upon a time")
-
-# Or with custom settings
-text = generate_text(
-    prompt="Once upon a time",
-    max_tokens=200,
-    temperature=0.7,
-    top_k=50,
-    top_p=0.95,
-    repetition_penalty=1.2,
-    stop_tokens=['.', '!', '?']
+# Create generator with a trained model
+generator = Generator(
+    model=model,  # Your trained model
+    model_config=model_config,
+    training_config=training_config
 )
 
-# Or with your own model
-text = generate_text(
+# Generate text
+generated_text = generator.generate(
     prompt="Once upon a time",
-    model=your_trained_model,
-    device='cuda'
+    max_tokens=100,
+    temperature=0.8,
+    top_k=40,
+    top_p=0.9,
+    repetition_penalty=1.0,
+    stop_tokens=['.', '!', '?']
 )
 ```
 
 ### Saving and Loading Models
 
-The project provides utilities for saving and loading models:
+The GPT model includes built-in methods for saving and loading:
 
 ```python
-from src.utils.io import save_checkpoint, load_checkpoint
-from src.config.training_config import TrainingConfig
-
 # Save a model
-save_checkpoint(model, optimizer, training_config)
+model.save(optimizer, training_config)
 
 # Load a model
-checkpoint = load_checkpoint(training_config)
-model.load_state_dict(checkpoint['model'])
-optimizer.load_state_dict(checkpoint['optimizer'])
+model, optimizer = GPT.load(model_config, training_config)
 ```
 
-For a complete example of saving and loading models, see `src/save_model.py`.
+See `src/save_model.py` for complete examples of training, saving, loading, and generating text.
 
 ## Configuration
 
 ### Model Configuration
 
-Model parameters can be configured in `src/config/model_config.py`:
+Configure the model architecture in `src/config/model_config.py`:
 
 - Vocabulary size
-- Embedding dimension
-- Number of layers
-- Number of attention heads
 - Block size (context length)
+- Number of layers
+- Number of heads
+- Embedding dimension
+- Dropout rate
 
 ### Training Configuration
 
-Training parameters can be configured in `src/config/training_config.py`:
+Set training parameters in `src/config/training_config.py`:
 
 - Batch size
 - Learning rate
 - Number of iterations
 - Evaluation interval
-- Checkpoint directory
+- Gradient clipping
+- Mixed precision training
 - Distributed training settings
 
 ## Distributed Training
 
 To enable distributed training:
 
-1. Set `distributed=True` in your training configuration
-2. Run the training script with the appropriate number of processes:
+1. Set `ddp=True` in `TrainingConfig`
+2. Run the training script with:
 
 ```bash
 torchrun --nproc_per_node=N src/train.py
 ```
 
-where N is the number of GPUs you want to use.
+where N is the number of GPUs to use.
 
 ## Contributing
 

@@ -1,65 +1,63 @@
 """
-Example script demonstrating how to save and load models, and use the training and generation functions.
+Example script demonstrating how to use the Trainer and Generator classes.
 """
 
+import os
 import torch
 from src.config.model_config import ModelConfig
 from src.config.training_config import TrainingConfig
 from src.models import GPT
-from src.utils.io import save_checkpoint, load_checkpoint
-from src.train import train
-from src.generate import generate_text
+from src.train import Trainer
+from src.generate import Generator
 
-def save_model_example():
-    """Example of saving a model after training."""
+def train_and_save_example():
+    """Example of training a model and saving it using the Trainer class."""
     # Create configurations
     model_config = ModelConfig()
     training_config = TrainingConfig()
     
-    # Train the model
-    model, optimizer, best_val_loss = train(
+    # Create trainer
+    trainer = Trainer(
         model_config=model_config,
-        training_config=training_config,
-        # Optional parameters:
-        # train_data=your_train_data,
-        # val_data=your_val_data,
-        # device='cuda',
-        # ddp=False,
-        # wandb_run=your_wandb_run
+        training_config=training_config
     )
     
+    # Train the model
+    model, optimizer, best_val_loss = trainer.train()
     print(f"Training completed. Best validation loss: {best_val_loss:.4f}")
     
-    # Save the model
-    save_checkpoint(model, optimizer, training_config)
-    print(f"Model saved to {training_config.out_dir}/ckpt.pt")
+    # Save the model using the built-in method
+    model.save(optimizer, training_config)
 
-def load_model_example():
-    """Example of loading a saved model and using it for generation."""
+def load_and_generate_example():
+    """Example of loading a saved model and using it for generation with the Generator class."""
     # Create configurations
     model_config = ModelConfig()
     training_config = TrainingConfig()
     
-    # Load the checkpoint
-    checkpoint = load_checkpoint(training_config)
+    # Check if model checkpoint exists
+    checkpoint_path = os.path.join(training_config.out_dir, 'ckpt.pt')
+    if not os.path.exists(checkpoint_path):
+        print(f"Error: No model checkpoint found at {checkpoint_path}")
+        print("Please run train_and_save_example() first to train and save a model.")
+        return
     
-    # Create model and optimizer
-    model = GPT(model_config)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=training_config.learning_rate)
+    # Load the pretrained model
+    model, optimizer = GPT.load(model_config, training_config)
+    print(f"Successfully loaded model from {checkpoint_path}")
     
-    # Restore model and optimizer state
-    model.load_state_dict(checkpoint['model'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    
-    print(f"Model loaded from {training_config.out_dir}/ckpt.pt")
+    # Create generator with the loaded model
+    generator = Generator(
+        model=model,
+        model_config=model_config,
+        training_config=training_config
+    )
     
     # Example of using the loaded model for generation
     prompt = "Once upon a time"
-    generated_text = generate_text(
+    print(f"\nGenerating text from prompt: {prompt}")
+    generated_text = generator.generate(
         prompt=prompt,
-        model=model,
-        model_config=model_config,
-        training_config=training_config,
         max_tokens=100,
         temperature=0.8,
         top_k=40,
@@ -68,16 +66,15 @@ def load_model_example():
         stop_tokens=['.', '!', '?']
     )
     
-    print(f"\nPrompt: {prompt}")
     print(f"Generated text: {generated_text}")
 
 def main():
     """Run the examples."""
     print("=== Training and Saving Model Example ===")
-    save_model_example()
+    train_and_save_example()
     
     print("\n=== Loading Model and Generation Example ===")
-    load_model_example()
+    load_and_generate_example()
 
 if __name__ == '__main__':
     main() 
