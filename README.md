@@ -1,6 +1,6 @@
-# nanoGPT
+# TradeGPT
 
-A PyTorch implementation of GPT for text generation, based on the [nanoGPT](https://github.com/karpathy/nanoGPT) project by Andrej Karpathy.
+A PyTorch implementation of GPT for prediction, based on the [nanoGPT](https://github.com/karpathy/nanoGPT) project by Andrej Karpathy.
 
 ## Features
 
