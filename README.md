@@ -1,4 +1,4 @@
-# nanoGPT
+# TradeGPT
 
 A PyTorch implementation of GPT for text generation, based on the [nanoGPT](https://github.com/karpathy/nanoGPT) project by Andrej Karpathy.
 
@@ -17,7 +17,7 @@ A PyTorch implementation of GPT for text generation, based on the [nanoGPT](http
 ## Project Structure
 
 ```
-nanoGPT/
+TradeGPT/
 ├── src/
 │   ├── config/           # Configuration files
 │   │   ├── model_config.py    # Model architecture configuration
@@ -44,8 +44,8 @@ nanoGPT/
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/nanoGPT.git
-cd nanoGPT
+git clone https://github.com/yourusername/TradeGPT.git
+cd TradeGPT
 ```
 
 2. Create a virtual environment (recommended):
