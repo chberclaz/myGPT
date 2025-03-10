@@ -16,6 +16,7 @@ class TrainingConfig:
     max_iters: int = 5000
     eval_interval: int = 500
     eval_iters: int = 200
+    gradient_accumulation_steps: int = 1  # Number of steps to accumulate gradients before updating
     
     # Optimization parameters
     weight_decay: float = 0.1
@@ -51,4 +52,6 @@ class TrainingConfig:
     
     # Output settings
     out_dir: str = "out"
-    save_interval: int = 1000 
+    save_interval: int = 1000
+    log_interval: int = 100  # Interval for logging training progress
+    always_save_checkpoint: bool = True  # Whether to save checkpoints even if validation loss doesn't improve 

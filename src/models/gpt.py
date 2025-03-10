@@ -34,11 +34,50 @@ class GPT(nn.Module):
         
         # Initialize weights
         self.apply(self._init_weights)
+        self.dataset = config.dataset
         
         # Apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith('proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
+
+    @staticmethod
+    def create_optimizer(model: 'GPT', config: TrainingConfig) -> torch.optim.Optimizer:
+        """Create optimizer with proper weight decay settings."""
+        # Start with all parameters
+        param_dict = {pn: p for pn, p in model.named_parameters()}
+        
+        # Filter out parameters that don't require grad
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        
+        # Create optimizer groups with weight decay only for 2D parameters
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': config.weight_decay},
+            {'params': nodecay_params, 'weight_decay': 0.0}
+        ]
+        
+        # Create optimizer
+        if config.distributed and config.zero_stage > 0:
+            from torch.distributed.optim import ZeroRedundancyOptimizer
+            optimizer = ZeroRedundancyOptimizer(
+                optim_groups,
+                optimizer_class=torch.optim.AdamW,
+                lr=config.learning_rate,
+                betas=config.betas,
+                eps=1e-8
+            )
+        else:
+            optimizer = torch.optim.AdamW(
+                optim_groups,
+                lr=config.learning_rate,
+                betas=config.betas,
+                eps=1e-8
+            )
+        
+        return optimizer
     
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -88,45 +127,55 @@ class GPT(nn.Module):
         
         return logits, loss
     
-    def save(self, optimizer: torch.optim.Optimizer, training_config: TrainingConfig) -> None:
+    def save(self, optimizer: torch.optim.Optimizer, training_config: TrainingConfig, iter_num: int = 0, best_val_loss: float = float('inf')) -> None:
         """
         Save the model checkpoint.
         
         Args:
             optimizer: The optimizer used for training
             training_config: Training configuration containing output directory
+            iter_num: Current iteration number
+            best_val_loss: Best validation loss so far
         """
         from src.utils.io import save_checkpoint
-        save_checkpoint(self, optimizer, training_config)
+        save_checkpoint(self, optimizer, self.config, training_config, iter_num, best_val_loss)
         print(f"Model saved to {training_config.out_dir}/ckpt.pt")
     
     @classmethod
-    def load(cls, model_config: ModelConfig, training_config: TrainingConfig) -> Tuple['GPT', torch.optim.Optimizer]:
+    def load(cls, model_config: ModelConfig = None, training_config: TrainingConfig = None) -> Tuple['GPT', torch.optim.Optimizer, ModelConfig, TrainingConfig]:
         """
         Load a saved model checkpoint.
         
         Args:
-            model_config: Model configuration
-            training_config: Training configuration containing checkpoint directory
+            model_config: Optional model configuration. If None, loads from checkpoint
+            training_config: Optional training configuration. If None, loads from checkpoint
             
         Returns:
-            Tuple of (model, optimizer)
+            Tuple of (model, optimizer, model_config, training_config)
         """
         from src.utils.io import load_checkpoint
         
         # Load the checkpoint
         checkpoint = load_checkpoint(training_config)
+        if checkpoint is None:
+            raise FileNotFoundError(f"No checkpoint found in {training_config.out_dir}/ckpt.pt")
+        
+        # Load configurations from checkpoint if not provided
+        if model_config is None:
+            model_config = ModelConfig(**checkpoint['model_config'])
+        if training_config is None:
+            training_config = TrainingConfig(**checkpoint['training_config'])
         
         # Create model and optimizer
         model = cls(model_config)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=training_config.learning_rate)
+        optimizer = cls.create_optimizer(model, training_config)
         
         # Restore model and optimizer state
         model.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         
         print(f"Model loaded from {training_config.out_dir}/ckpt.pt")
-        return model, optimizer
+        return model, optimizer, model_config, training_config
     
     def generate(self, prompt: str, max_tokens: int = 100, temperature: float = 0.8,
                 top_k: int = 40, top_p: float = 0.9, repetition_penalty: float = 1.0,
@@ -142,20 +191,21 @@ class GPT(nn.Module):
             top_p: Cumulative probability threshold for sampling
             repetition_penalty: Penalty for repeating tokens
             stop_tokens: List of tokens to stop generation at
-            device: Device to run generation on. If None, uses CUDA if available
+            device: Device to run generation on. If None, uses model's device
             
         Returns:
             Generated text as string
         """
         from src.data.tokenizer import get_tokenizer
         
+        # Use model's device if none specified
         if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device = next(self.parameters()).device
         
         # Get tokenizer
-        encode, decode = get_tokenizer(self.config.dataset)
+        encode, decode = get_tokenizer(self.dataset)
         
-        # Encode the prompt
+        # Encode the prompt and move to device
         context = torch.tensor(encode(prompt), dtype=torch.long, device=device).unsqueeze(0)
         
         # Generate tokens
@@ -191,7 +241,7 @@ class GPT(nn.Module):
             next_token = torch.multinomial(probs, num_samples=1)
             
             # Check for stop tokens
-            if stop_tokens and decode(next_token.item()) in stop_tokens:
+            if stop_tokens and decode([next_token.item()]) in stop_tokens:
                 break
             
             # Append the generated token

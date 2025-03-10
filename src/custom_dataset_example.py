@@ -17,7 +17,7 @@ from src.train import Trainer
 from src.generate import Generator
 from src.data.tokenizer import get_tokenizer
 
-def prepare_custom_data(text_file: str) -> Tuple[torch.Tensor, torch.Tensor]:
+def prepare_custom_data(text_file: str, training_config: TrainingConfig) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Prepare custom data from a text file.
     
@@ -32,7 +32,7 @@ def prepare_custom_data(text_file: str) -> Tuple[torch.Tensor, torch.Tensor]:
         text = f.read()
     
     # Get the tokenizer
-    encode, decode = get_tokenizer('custom')
+    encode, decode = get_tokenizer(training_config)
     
     # Encode the text
     data = torch.tensor(encode(text), dtype=torch.long)
@@ -44,33 +44,15 @@ def prepare_custom_data(text_file: str) -> Tuple[torch.Tensor, torch.Tensor]:
     
     return train_data, val_data
 
-def train_on_custom_data():
+def train_on_custom_data(model_config: ModelConfig, training_config: TrainingConfig):
     """Example of training the model on a custom dataset."""
-    # Create configurations
-    model_config = ModelConfig(
-        vocab_size=50257,  # Adjust based on your tokenizer
-        block_size=256,    # Adjust based on your needs
-        n_layer=6,         # Smaller model for faster training
-        n_head=6,
-        n_embd=384
-    )
-    
-    training_config = TrainingConfig(
-        batch_size=32,
-        learning_rate=3e-4,
-        max_iters=5000,    # Adjust based on your needs
-        eval_interval=500,
-        eval_iters=200,
-        warmup_iters=100,
-        lr_decay_iters=5000,
-        min_lr=3e-5,
-        out_dir='out/custom_model'
-    )
+
     
     # Prepare custom data
     print("Loading custom dataset...")
     train_data, val_data = prepare_custom_data(
-        text_file='data/custom/input_dante.txt'
+        text_file='data/custom/input_dante.txt',
+        training_config=training_config
     )
     print(f"Dataset loaded. Train size: {len(train_data)}, Val size: {len(val_data)}")
     
@@ -90,6 +72,7 @@ def train_on_custom_data():
     # Save the model
     print("Saving model...")
     model.save(optimizer, training_config)
+    print(f"model parameters trained & saved: {model.parameters()}")
     print(f"Model saved to {training_config.out_dir}/ckpt.pt")
     
     return model, model_config, training_config
@@ -98,37 +81,43 @@ def main():
     """Run the complete example workflow."""
     # Create configurations (must match training configuration)
     model_config = ModelConfig(
-        vocab_size=50304,
+        vocab_size=50257,
         block_size=256,
         n_layer=6,
         n_head=6,
-        n_embd=384
+        n_embd=384,
+        dataset='custom'
+
     )
     
     training_config = TrainingConfig(
         batch_size=8,
         learning_rate=3e-4,
-        max_iters=5000,
-        eval_interval=500,
+        max_iters=200,
+        eval_interval=200,
         eval_iters=200,
         warmup_iters=100,
         lr_decay_iters=5000,
         min_lr=3e-5,
-        out_dir='out/custom_model'
+        out_dir='out/custom_model',
+        device='cuda' if torch.cuda.is_available() else 'cpu',  # Set device in config
+        dataset='custom'
+
     )
-    
+
     # Check if model checkpoint exists
     checkpoint_path = os.path.join(training_config.out_dir, 'ckpt.pt')
     if os.path.exists(checkpoint_path):
         print("=== Loading Existing Model ===")
         # Load the model from checkpoint
-        model, optimizer = GPT.load(model_config, training_config)
+        model, optimizer, model_config, training_config = GPT.load(model_config, training_config)
         print(f"Model loaded from {checkpoint_path}")
     else:
         print("=== Training New Model ===")
         # Train and save a new model
-        model, model_config, training_config = train_on_custom_data()
+        model, model_config, training_config = train_on_custom_data(model_config, training_config)
     
+    print(f"model parameters trained bevor generating: {model.parameters()}")
     # Create generator with the model (whether loaded or newly trained)
     print("\n=== Creating Generator with Model ===")
     generator = Generator(

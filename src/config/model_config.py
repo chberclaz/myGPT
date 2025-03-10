@@ -14,7 +14,7 @@ class ModelConfig:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
-    
+    dataset: str = 'custom'
     # Model variants
     @classmethod
     def gpt2(cls):

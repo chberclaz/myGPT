@@ -18,7 +18,7 @@ from src.data.dataloader import prepare_data
 from src.data.tokenizer import get_tokenizer
 from src.models import GPT
 from src.utils.io import load_checkpoint, save_checkpoint
-from src.utils.distributed import setup_distributed, cleanup_distributed, get_optimizer
+from src.utils.distributed import setup_distributed, cleanup_distributed
 
 def get_lr(config: TrainingConfig, it: int) -> float:
     """
@@ -63,35 +63,33 @@ class Trainer:
         Args:
             model_config: Model configuration. If None, loads from config/model_config.py
             training_config: Training configuration. If None, loads from config/training_config.py
-            train_data: Training dataset. If None, loads from config/data_config.py
-            val_data: Validation dataset. If None, loads from config/data_config.py
-            model: Pre-initialized model. If None, creates new model
-            optimizer: Pre-initialized optimizer. If None, creates new optimizer
+            train_data: Training dataset. If None, loads from data directory
+            val_data: Validation dataset. If None, loads from data directory
+            model: Pre-trained GPT model. If None, creates new model
+            optimizer: Optimizer. If None, creates new optimizer
             device: Device to train on. If None, uses CUDA if available
             rank: Process rank for distributed training
             world_size: Total number of processes for distributed training
-            ddp: Whether to use distributed training
-            wandb_run: Weights & Biases run object for logging
+            ddp: Whether to use DistributedDataParallel
+            wandb_run: Optional wandb run for logging
         """
         # Load configurations if not provided
         self.model_config = model_config or ModelConfig()
         self.training_config = training_config or TrainingConfig()
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.training_config.device = self.device  # Ensure device is set in config
         self.rank = rank
         self.world_size = world_size
         self.ddp = ddp
         self.wandb_run = wandb_run
         
-        # Set up distributed training if enabled
-        if ddp:
-            setup_distributed(rank, world_size)
-        
         # Prepare data if not provided
         if train_data is None or val_data is None:
             self.train_data, self.val_data = prepare_data(self.training_config)
         else:
-            self.train_data = train_data
-            self.val_data = val_data
+            # Move provided data to device if needed
+            self.train_data = train_data.to(self.device) if isinstance(train_data, torch.Tensor) else train_data
+            self.val_data = val_data.to(self.device) if isinstance(val_data, torch.Tensor) else val_data
         
         # Initialize model if not provided
         if model is None:
@@ -100,11 +98,13 @@ class Trainer:
             if ddp:
                 self.model = DDP(self.model, device_ids=[rank])
         else:
-            self.model = model
+            self.model = model.to(self.device)
+            if ddp:
+                self.model = DDP(self.model, device_ids=[rank])
         
         # Create optimizer if not provided
         if optimizer is None:
-            self.optimizer = get_optimizer(self.model, self.training_config)
+            self.optimizer = GPT.create_optimizer(self.model, self.training_config)
         else:
             self.optimizer = optimizer
         
@@ -130,15 +130,16 @@ class Trainer:
         Returns:
             Tuple of (input tensor, target tensor)
         """
+        # Move data to device if it's not already there
+        if isinstance(data, torch.Tensor) and data.device != self.device:
+            data = data.to(self.device)
+            
         # Generate a small batch of data of inputs x and targets y
-        ix = torch.randint(len(data) - block_size, (batch_size,))
-        #x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
-        #y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
-        x=torch.stack([data[i:i+block_size] for i in ix])
-        y=torch.stack([data[i+1:i+block_size+1] for i in ix])
-
-        x, y = x.to(self.device), y.to(self.device)
-        return x, y
+        ix = torch.randint(len(data) - block_size, (batch_size,), device=self.device)
+        x = torch.stack([data[i:i+block_size] for i in ix])
+        y = torch.stack([data[i+1:i+block_size+1] for i in ix])
+        
+        return x, y  # No need to move to device since data is already there
     
     def estimate_loss(self, model: GPT, train_data: Dataset, val_data: Dataset) -> dict:
         """
@@ -155,7 +156,7 @@ class Trainer:
         out = {}
         model.eval()
         for split in ['train', 'val']:
-            losses = torch.zeros(self.training_config.eval_iters)
+            losses = torch.zeros(self.training_config.eval_iters, device=self.device)
             for k in range(self.training_config.eval_iters):
                 X, Y = self.get_batch(
                     train_data if split == 'train' else val_data,
@@ -176,8 +177,11 @@ class Trainer:
         Returns:
             Tuple of (model, optimizer, best_val_loss)
         """
-        # Training loop
+        # Ensure model is on the correct device
+        self.model = self.model.to(self.device)
         self.model.train()
+        
+        # Get initial batch
         X, Y = self.get_batch(self.train_data, self.training_config.batch_size, self.training_config.block_size)
         t0 = time.time()
         local_iter_num = 0
@@ -185,7 +189,7 @@ class Trainer:
         
         # Calculate total iterations
         total_iters = self.training_config.max_iters if self.training_config.max_iters is not None else float('inf')
-        
+        print(f"total_iters: {total_iters}")
         for local_iter_num in range(total_iters):
             # Determine and set the learning rate for this iteration
             lr = get_lr(self.training_config, self.start_iter + local_iter_num) if self.training_config.lr_decay_iters else self.training_config.learning_rate
@@ -195,7 +199,7 @@ class Trainer:
             # Evaluate the loss on train/val sets and write checkpoints
             if local_iter_num % self.training_config.eval_interval == 0:
                 losses = self.estimate_loss(self.model, self.train_data, self.val_data)
-                print(f"step {local_iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+                print(f"iter {local_iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
                 if self.wandb_run:
                     self.wandb_run.log({
                         'train/loss': losses['train'],
@@ -206,7 +210,12 @@ class Trainer:
                 if losses['val'] < self.best_val_loss or self.training_config.always_save_checkpoint:
                     self.best_val_loss = losses['val']
                     if local_iter_num > 0:
-                        self.model.save(self.optimizer, self.training_config)
+                        self.model.save(
+                            optimizer=self.optimizer,
+                            training_config=self.training_config,
+                            iter_num=self.start_iter + local_iter_num,
+                            best_val_loss=self.best_val_loss
+                        )
             
             # Forward backward update, with optional gradient accumulation to simulate larger batch size
             for micro_step in range(self.training_config.gradient_accumulation_steps):
@@ -217,6 +226,10 @@ class Trainer:
                 if self.training_config.grad_clip != 0.0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.training_config.grad_clip)
                 self.optimizer.step()
+                self.optimizer.zero_grad()  # Reset gradients after each step
+                
+                # Get next batch
+                X, Y = self.get_batch(self.train_data, self.training_config.batch_size, self.training_config.block_size)
             
             # Timing and logging
             t1 = time.time()
