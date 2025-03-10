@@ -6,7 +6,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ..config.model_config import ModelConfig
+from src.config.model_config import ModelConfig
 
 class CausalSelfAttention(nn.Module):
     """Causal self-attention implementation."""

@@ -6,17 +6,39 @@ import os
 import time
 import torch
 import torch.nn as nn
+from typing import Tuple
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
+import math
 
-from config.model_config import ModelConfig
-from config.training_config import TrainingConfig
-from data.dataloader import prepare_data
-from data.tokenizer import get_tokenizer
-from models import GPT
-from utils.io import load_checkpoint, save_checkpoint
-from utils.distributed import setup_distributed, cleanup_distributed, get_optimizer
+from src.config.model_config import ModelConfig
+from src.config.training_config import TrainingConfig
+from src.data.dataloader import prepare_data
+from src.data.tokenizer import get_tokenizer
+from src.models import GPT
+from src.utils.io import load_checkpoint, save_checkpoint
+from src.utils.distributed import setup_distributed, cleanup_distributed, get_optimizer
+
+def get_lr(config: TrainingConfig, it: int) -> float:
+    """
+    Calculate learning rate based on iteration number.
+    
+    Args:
+        config: Training configuration
+        it: Current iteration number
+        
+    Returns:
+        Learning rate for the current iteration
+    """
+    # Linear warmup for warmup_iters steps
+    if it < config.warmup_iters:
+        return config.learning_rate * it / config.warmup_iters
+    # Cosine learning rate decay
+    decay_ratio = (it - config.warmup_iters) / (config.lr_decay_iters - config.warmup_iters)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
+    return config.min_lr + coeff * (config.learning_rate - config.min_lr)
 
 class Trainer:
     """Class for training GPT models."""
@@ -110,8 +132,11 @@ class Trainer:
         """
         # Generate a small batch of data of inputs x and targets y
         ix = torch.randint(len(data) - block_size, (batch_size,))
-        x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
-        y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
+        #x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
+        #y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
+        x=torch.stack([data[i:i+block_size] for i in ix])
+        y=torch.stack([data[i+1:i+block_size+1] for i in ix])
+
         x, y = x.to(self.device), y.to(self.device)
         return x, y
     
@@ -163,7 +188,7 @@ class Trainer:
         
         for local_iter_num in range(total_iters):
             # Determine and set the learning rate for this iteration
-            lr = get_lr(self.training_config, self.start_iter + local_iter_num) if self.training_config.decay_lr else self.training_config.learning_rate
+            lr = get_lr(self.training_config, self.start_iter + local_iter_num) if self.training_config.lr_decay_iters else self.training_config.learning_rate
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = lr
             

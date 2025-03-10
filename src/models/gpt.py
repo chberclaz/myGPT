@@ -6,8 +6,13 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Tuple
-from ..config.model_config import ModelConfig
+from typing import Optional, Tuple, List
+from src.config.model_config import ModelConfig
+from src.config.training_config import TrainingConfig
+from src.models.block import Block
+from src.models.mlp import MLP
+from src.models.attention import CausalSelfAttention
+from src.models.gelu import NewGELU
 
 class GPT(nn.Module):
     """GPT model with configurable architecture."""

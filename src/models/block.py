@@ -3,9 +3,9 @@ Transformer block implementation.
 """
 
 import torch.nn as nn
-from ..config.model_config import ModelConfig
-from .attention import CausalSelfAttention
-from .mlp import MLP
+from src.config.model_config import ModelConfig
+from src.models.attention import CausalSelfAttention
+from src.models.mlp import MLP
 
 class Block(nn.Module):
     """Transformer block implementation."""

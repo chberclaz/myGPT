@@ -6,11 +6,11 @@ import torch
 import torch.nn.functional as F
 from typing import List, Optional, Tuple
 
-from config.model_config import ModelConfig
-from config.training_config import TrainingConfig
-from data.tokenizer import get_tokenizer
-from models import GPT
-from utils.io import load_checkpoint
+from src.config.model_config import ModelConfig
+from src.config.training_config import TrainingConfig
+from src.data.tokenizer import get_tokenizer
+from src.models import GPT
+from src.utils.io import load_checkpoint
 
 class Generator:
     """Class for generating text using trained GPT models."""

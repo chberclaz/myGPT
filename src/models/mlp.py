@@ -3,8 +3,8 @@ MLP layer implementation.
 """
 
 import torch.nn as nn
-from ..config.model_config import ModelConfig
-from .gelu import NewGELU
+from src.config.model_config import ModelConfig
+from src.models.gelu import NewGELU
 
 class MLP(nn.Module):
     """MLP layer implementation."""

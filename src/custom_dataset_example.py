@@ -10,12 +10,12 @@ import os
 import torch
 import numpy as np
 from typing import Tuple
-from config.model_config import ModelConfig
-from config.training_config import TrainingConfig
-from models import GPT
-from train import Trainer
-from generate import Generator
-from data.tokenizer import get_tokenizer
+from src.config.model_config import ModelConfig
+from src.config.training_config import TrainingConfig
+from src.models import GPT
+from src.train import Trainer
+from src.generate import Generator
+from src.data.tokenizer import get_tokenizer
 
 def prepare_custom_data(text_file: str) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -52,28 +52,25 @@ def train_on_custom_data():
         block_size=256,    # Adjust based on your needs
         n_layer=6,         # Smaller model for faster training
         n_head=6,
-        n_embd=384,
-        dropout=0.1
+        n_embd=384
     )
     
     training_config = TrainingConfig(
         batch_size=32,
-        block_size=256,
+        learning_rate=3e-4,
         max_iters=5000,    # Adjust based on your needs
         eval_interval=500,
-        learning_rate=3e-4,
-        min_lr=3e-5,
+        eval_iters=200,
         warmup_iters=100,
         lr_decay_iters=5000,
-        gradient_accumulation_steps=5,
-        eval_iters=200,
+        min_lr=3e-5,
         out_dir='out/custom_model'
     )
     
     # Prepare custom data
     print("Loading custom dataset...")
     train_data, val_data = prepare_custom_data(
-        text_file='data/custom/your_text_file.txt'
+        text_file='data/custom/input_dante.txt'
     )
     print(f"Dataset loaded. Train size: {len(train_data)}, Val size: {len(val_data)}")
     
@@ -105,13 +102,18 @@ def main():
         block_size=256,
         n_layer=6,
         n_head=6,
-        n_embd=384,
-        dropout=0.1
+        n_embd=384
     )
     
     training_config = TrainingConfig(
         batch_size=8,
-        block_size=256,
+        learning_rate=3e-4,
+        max_iters=5000,
+        eval_interval=500,
+        eval_iters=200,
+        warmup_iters=100,
+        lr_decay_iters=5000,
+        min_lr=3e-5,
         out_dir='out/custom_model'
     )
     

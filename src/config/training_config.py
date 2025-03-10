@@ -11,6 +11,7 @@ class TrainingConfig:
     
     # Training parameters
     batch_size: int = 64
+    block_size: int = 256
     learning_rate: float = 1e-4
     max_iters: int = 5000
     eval_interval: int = 500
