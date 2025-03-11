@@ -41,8 +41,10 @@ class TrainingConfig:
     
     # Data parameters
     dataset: str = "shakespeare"
-    train_data_path: str = "data/shakespeare/input.txt"
-    val_data_path: Optional[str] = None
+    input_file: str = "input_dante.txt"
+    data_dir: str = "data/custom/"
+    train_data_path: str = "data/custom/"
+    val_data_path: str = "data/custom/"
     
     # Generation parameters
     temperature: float = 0.8
@@ -51,7 +53,7 @@ class TrainingConfig:
     num_samples: int = 10
     
     # Output settings
-    out_dir: str = "out"
-    save_interval: int = 1000
+    out_dir: str = "data/custom/out"
+    save_interval: int = 2000
     log_interval: int = 100  # Interval for logging training progress
     always_save_checkpoint: bool = True  # Whether to save checkpoints even if validation loss doesn't improve 

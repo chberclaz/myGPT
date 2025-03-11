@@ -139,8 +139,7 @@ class GPT(nn.Module):
         """
         from src.utils.io import save_checkpoint
         save_checkpoint(self, optimizer, self.config, training_config, iter_num, best_val_loss)
-        print(f"Model saved to {training_config.out_dir}/ckpt.pt")
-    
+        
     @classmethod
     def load(cls, model_config: ModelConfig = None, training_config: TrainingConfig = None) -> Tuple['GPT', torch.optim.Optimizer, ModelConfig, TrainingConfig]:
         """
@@ -166,6 +165,7 @@ class GPT(nn.Module):
         if training_config is None:
             training_config = TrainingConfig(**checkpoint['training_config'])
         
+        model_config.dataset = training_config.dataset
         # Create model and optimizer
         model = cls(model_config)
         optimizer = cls.create_optimizer(model, training_config)
@@ -174,7 +174,7 @@ class GPT(nn.Module):
         model.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         
-        print(f"Model loaded from {training_config.out_dir}/ckpt.pt")
+        #print(f"Model loaded from {training_config.out_dir}/ckpt.pt")
         return model, optimizer, model_config, training_config
     
     def generate(self, prompt: str, max_tokens: int = 100, temperature: float = 0.8,
@@ -241,13 +241,15 @@ class GPT(nn.Module):
             next_token = torch.multinomial(probs, num_samples=1)
             
             # Check for stop tokens
-            if stop_tokens and decode([next_token.item()]) in stop_tokens:
-                break
+
             
             # Append the generated token
             generated_tokens.append(next_token.item())
             context = torch.cat([context, next_token], dim=1)
-        
+
+            if stop_tokens and decode([next_token.item()]) in stop_tokens:
+                break
+
         # Decode the generated tokens
         generated_text = decode(generated_tokens)
         

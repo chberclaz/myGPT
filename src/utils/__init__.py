@@ -10,6 +10,5 @@ __all__ = [
     'save_checkpoint',
     'get_latest_checkpoint',
     'setup_distributed',
-    'cleanup_distributed',
-    'get_optimizer'
+    'cleanup_distributed'
 ] 

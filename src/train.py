@@ -14,7 +14,7 @@ import math
 
 from src.config.model_config import ModelConfig
 from src.config.training_config import TrainingConfig
-from src.data.dataloader import prepare_data
+from src.data.dataloader import DataManager
 from src.data.tokenizer import get_tokenizer
 from src.models import GPT
 from src.utils.io import load_checkpoint, save_checkpoint
@@ -85,7 +85,14 @@ class Trainer:
         
         # Prepare data if not provided
         if train_data is None or val_data is None:
-            self.train_data, self.val_data = prepare_data(self.training_config)
+            data_manager = DataManager(self.training_config)
+            try:
+                # Try to load existing data
+                self.train_data, self.val_data = data_manager.load_data()
+            except FileNotFoundError:
+                # If no existing data, prepare new data
+                self.train_data, self.val_data = data_manager.prepare_data()
+                data_manager.save_data()
         else:
             # Move provided data to device if needed
             self.train_data = train_data.to(self.device) if isinstance(train_data, torch.Tensor) else train_data
@@ -111,13 +118,14 @@ class Trainer:
         # Load checkpoint if exists
         self.best_val_loss = float('inf')
         self.start_iter = 0
-        if os.path.exists(os.path.join(self.training_config.out_dir, 'ckpt.pt')):
+        """   if os.path.exists(os.path.join(self.training_config.out_dir, 'ckpt.pt')):
+            print(f"from Trainer")
             checkpoint = load_checkpoint(self.training_config)
             self.model.load_state_dict(checkpoint['model'])
             self.optimizer.load_state_dict(checkpoint['optimizer'])
             self.start_iter = checkpoint['iter_num']
             self.best_val_loss = checkpoint['best_val_loss']
-    
+        """
     def get_batch(self, data: Dataset, batch_size: int, block_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Get a batch of data from the dataset.
@@ -135,9 +143,9 @@ class Trainer:
             data = data.to(self.device)
             
         # Generate a small batch of data of inputs x and targets y
-        ix = torch.randint(len(data) - block_size, (batch_size,), device=self.device)
+        ix = torch.randint(len(data) - block_size - 1, (batch_size,), device=self.device)  # -1 to account for target shift
         x = torch.stack([data[i:i+block_size] for i in ix])
-        y = torch.stack([data[i+1:i+block_size+1] for i in ix])
+        y = torch.stack([data[i+1:i+1+block_size] for i in ix])  # Shifted by 1 but same length as x
         
         return x, y  # No need to move to device since data is already there
     
@@ -192,9 +200,9 @@ class Trainer:
         print(f"total_iters: {total_iters}")
         for local_iter_num in range(total_iters):
             # Determine and set the learning rate for this iteration
-            lr = get_lr(self.training_config, self.start_iter + local_iter_num) if self.training_config.lr_decay_iters else self.training_config.learning_rate
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = lr
+            #lr = get_lr(self.training_config, self.start_iter + local_iter_num) if self.training_config.lr_decay_iters else self.training_config.learning_rate
+            #for param_group in self.optimizer.param_groups:
+            #    param_group['lr'] = lr
             
             # Evaluate the loss on train/val sets and write checkpoints
             if local_iter_num % self.training_config.eval_interval == 0:
@@ -204,7 +212,7 @@ class Trainer:
                     self.wandb_run.log({
                         'train/loss': losses['train'],
                         'val/loss': losses['val'],
-                        'lr': lr,
+                        #'lr': lr,
                         'mfu': running_mfu*100, # convert to percentage
                     })
                 if losses['val'] < self.best_val_loss or self.training_config.always_save_checkpoint:

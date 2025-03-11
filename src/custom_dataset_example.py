@@ -9,51 +9,30 @@ Example script demonstrating how to work with a custom dataset:
 import os
 import torch
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
 from src.config.model_config import ModelConfig
 from src.config.training_config import TrainingConfig
 from src.models import GPT
 from src.train import Trainer
 from src.generate import Generator
-from src.data.tokenizer import get_tokenizer
-
-def prepare_custom_data(text_file: str, training_config: TrainingConfig) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Prepare custom data from a text file.
-    
-    Args:
-        text_file: Path to the text file
-        
-    Returns:
-        Tuple of (train_data, val_data) tensors
-    """
-    # Read the text file
-    with open(text_file, 'r', encoding='utf-8') as f:
-        text = f.read()
-    
-    # Get the tokenizer
-    encode, decode = get_tokenizer(training_config)
-    
-    # Encode the text
-    data = torch.tensor(encode(text), dtype=torch.long)
-    
-    # Split into train and validation sets
-    n = int(0.9 * len(data))
-    train_data = data[:n]
-    val_data = data[n:]
-    
-    return train_data, val_data
+from src.data.dataloader import DataManager
 
 def train_on_custom_data(model_config: ModelConfig, training_config: TrainingConfig):
     """Example of training the model on a custom dataset."""
-
     
-    # Prepare custom data
-    print("Loading custom dataset...")
-    train_data, val_data = prepare_custom_data(
-        text_file='data/custom/input_dante.txt',
-        training_config=training_config
-    )
+    # Initialize data manager
+    data_manager = DataManager(training_config)
+    
+    # Prepare or load custom data
+    try:
+        print("Attempting to load existing data...")
+        train_data, val_data = data_manager.load_data()
+    except FileNotFoundError:
+        print("No existing data found. Preparing new data...")
+        train_data, val_data = data_manager.prepare_data(os.path.join(training_config.data_dir, training_config.input_file))
+        # Save the prepared data
+        data_manager.save_data()
+    
     print(f"Dataset loaded. Train size: {len(train_data)}, Val size: {len(val_data)}")
     
     # Create trainer with custom data
@@ -87,22 +66,21 @@ def main():
         n_head=6,
         n_embd=384,
         dataset='custom'
-
     )
     
     training_config = TrainingConfig(
-        batch_size=8,
+        batch_size=16,
         learning_rate=3e-4,
-        max_iters=200,
-        eval_interval=200,
-        eval_iters=200,
+        max_iters=8000,
+        eval_interval=1000,
+        eval_iters=800,
         warmup_iters=100,
         lr_decay_iters=5000,
         min_lr=3e-5,
-        out_dir='out/custom_model',
         device='cuda' if torch.cuda.is_available() else 'cpu',  # Set device in config
-        dataset='custom'
-
+        dataset='custom',
+        data_dir='data/custom/',
+        input_file='input_dante.txt'
     )
 
     # Check if model checkpoint exists
@@ -112,12 +90,34 @@ def main():
         # Load the model from checkpoint
         model, optimizer, model_config, training_config = GPT.load(model_config, training_config)
         print(f"Model loaded from {checkpoint_path}")
+        
+        # Load the training data
+        data_manager = DataManager(training_config)
+        train_data, val_data = data_manager.load_data()
+        training_config.max_iters = 2000
+        
+        trainer = Trainer(
+            model=model,
+            model_config=model_config,
+            training_config=training_config,
+            train_data=train_data,
+            val_data=val_data
+        )
+        
+        # Train the model
+        print("=== Starting training... ===")
+        #model, optimizer, best_val_loss = trainer.train()
+        #print(f"Training completed. Best validation loss: {best_val_loss:.4f}")
+        print("=== Saving model... ===")
+        #model.save(optimizer, training_config)
+        print(f"model parameters trained & saved: {model.parameters()}")
+        print(f"Model saved to {training_config.out_dir}/ckpt.pt")
     else:
         print("=== Training New Model ===")
         # Train and save a new model
         model, model_config, training_config = train_on_custom_data(model_config, training_config)
     
-    print(f"model parameters trained bevor generating: {model.parameters()}")
+    print(f"model parameters trained before generating: {model.parameters()}")
     # Create generator with the model (whether loaded or newly trained)
     print("\n=== Creating Generator with Model ===")
     generator = Generator(
@@ -139,7 +139,7 @@ def main():
         top_k=40,
         top_p=0.9,
         repetition_penalty=1.0,
-        stop_tokens=['.', '!', '?']
+        stop_tokens=['.']
     )
     print(f"Generated text: {generated_text1}")
     
@@ -153,7 +153,7 @@ def main():
         top_k=50,         # Consider more tokens
         top_p=0.95,       # Higher cumulative probability threshold
         repetition_penalty=1.2,  # Stronger repetition penalty
-        stop_tokens=['.', '!', '?', '\n']  # Also stop at newlines
+        stop_tokens=['.']  # Also stop at newlines
     )
     print(f"Generated text: {generated_text2}")
 
