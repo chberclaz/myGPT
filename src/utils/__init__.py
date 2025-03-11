@@ -1,14 +1,13 @@
 """
-Utility functions for training and model management.
+Utility functions for model training and I/O.
 """
 
 from .distributed import setup_distributed, cleanup_distributed
-from .io import load_checkpoint, save_checkpoint, get_latest_checkpoint
+from .io import save_checkpoint, load_checkpoint
 
 __all__ = [
-    'load_checkpoint',
-    'save_checkpoint',
-    'get_latest_checkpoint',
-    'setup_distributed',
-    'cleanup_distributed'
+    "setup_distributed",
+    "cleanup_distributed",
+    "save_checkpoint",
+    "load_checkpoint",
 ] 

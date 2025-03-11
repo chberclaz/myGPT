@@ -1,11 +1,10 @@
 """
-GPT model package.
+Model implementations.
 """
 
-from src.models.gpt import GPT
-from src.models.block import Block
-from src.models.attention import CausalSelfAttention
-from src.models.mlp import MLP
-from src.models.gelu import NewGELU
+from .gpt import GPT
+from .attention import CausalSelfAttention
+from .block import Block
+from .mlp import MLP
 
-__all__ = ['GPT', 'Block', 'CausalSelfAttention', 'MLP', 'NewGELU'] 
+__all__ = ["GPT", "CausalSelfAttention", "Block", "MLP"] 

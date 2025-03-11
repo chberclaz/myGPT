@@ -1,172 +1,114 @@
-# TradeGPT
+# NanoGPT-Trader
 
-A PyTorch implementation of GPT for text generation, based on the [nanoGPT](https://github.com/karpathy/nanoGPT) project by Andrej Karpathy.
+A GPT implementation optimized for trading applications, based on the nanoGPT architecture.
 
-## Features
+## Installation
 
-- Clean, modular implementation of GPT architecture
-- Support for distributed training using PyTorch DDP
-- Mixed precision training with FP16
-- Gradient accumulation for large batch sizes
-- Learning rate scheduling with cosine decay
-- Built-in model saving and loading
-- Text generation with various sampling strategies (temperature, top-k, top-p)
-- Support for multiple datasets (Shakespeare, custom datasets)
-- Comprehensive logging and experiment tracking with Weights & Biases
+You can install the package directly from the repository:
+
+```bash
+pip install git+https://github.com/chberclaz/trader.git
+```
+
+Or for development:
+
+```bash
+git clone https://github.com/chberclaz/trader.git
+cd nanogpt-trader
+pip install -e .
+```
+
+## Quick Start
+
+```python
+from src import GPT, Trainer, Generator, DataManager
+from src import ModelConfig, TrainingConfig
+
+# Create configurations
+model_config = ModelConfig(
+    vocab_size=50257,
+    block_size=256,
+    n_layer=6,
+    n_head=6,
+    n_embd=384,
+    dataset='custom'
+)
+
+training_config = TrainingConfig(
+    batch_size=16,
+    learning_rate=3e-4,
+    max_iters=8000,
+    eval_interval=800,
+    eval_iters=800,
+    warmup_iters=100,
+    lr_decay_iters=5000,
+    min_lr=3e-5,
+    out_dir='out/custom_model',
+    device='cuda' if torch.cuda.is_available() else 'cpu',
+    dataset='custom'
+)
+
+# Initialize data manager and prepare data
+data_manager = DataManager(training_config)
+train_data, val_data = data_manager.prepare_data(text_file='path/to/your/data.txt')
+
+# Create trainer and train model
+trainer = Trainer(
+    model_config=model_config,
+    training_config=training_config,
+    train_data=train_data,
+    val_data=val_data
+)
+model, optimizer, best_val_loss = trainer.train()
+
+# Generate text
+generator = Generator(model=model, model_config=model_config, training_config=training_config)
+generated_text = generator.generate(
+    prompt="Your prompt here",
+    max_tokens=100,
+    temperature=0.8
+)
+print(generated_text)
+```
 
 ## Project Structure
 
 ```
-TradeGPT/
-├── src/
-│   ├── config/           # Configuration files
-│   │   ├── model_config.py    # Model architecture configuration
-│   │   └── training_config.py # Training hyperparameters
-│   ├── data/            # Data handling
-│   │   ├── dataloader.py      # Data loading utilities
-│   │   └── tokenizer.py       # Text tokenization
-│   ├── models/          # Model implementation
-│   │   └── gpt.py            # GPT model architecture
-│   ├── utils/           # Utility functions
-│   │   ├── distributed.py    # Distributed training setup
-│   │   └── io.py            # Checkpoint saving/loading
-│   ├── train.py         # Main training script
-│   ├── generate.py      # Text generation script
-│   └── save_model.py    # Example usage scripts
-├── data/               # Dataset storage
-├── out/               # Model checkpoints and outputs
-├── requirements.txt   # Project dependencies
-└── README.md         # This file
+nanogpt-trader/
+├── src/                    # Main package directory
+│   ├── __init__.py        # Package initialization
+│   ├── models/            # Model implementations
+│   ├── config/            # Configuration classes
+│   ├── data/              # Data loading and processing
+│   ├── utils/             # Utility functions
+│   └── generate.py        # Text generation
+├── tests/                 # Test files
+├── docs/                  # Documentation
+├── data/                  # Data directory (gitignored)
+├── custom_dataset_example.py  # Example usage script
+├── requirements.txt       # Package dependencies
+├── setup.py              # Package setup file
+└── README.md             # This file
 ```
 
-## Installation
+## Features
 
-1. Clone the repository:
+- Efficient GPT implementation
+- Custom dataset support
+- Configurable model architecture
+- Training with gradient accumulation
+- Text generation with various parameters
+- Checkpoint saving and loading
+- Device (CPU/GPU) support
 
-```bash
-git clone https://github.com/yourusername/TradeGPT.git
-cd TradeGPT
-```
+## Example Scripts
 
-2. Create a virtual environment (recommended):
+Check `custom_dataset_example.py` for a complete example of:
 
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Training a Model
-
-The project provides a `Trainer` class that handles the entire training process:
-
-```python
-from src.config.model_config import ModelConfig
-from src.config.training_config import TrainingConfig
-from src.train import Trainer
-
-# Create configurations
-model_config = ModelConfig()
-training_config = TrainingConfig()
-
-# Create trainer
-trainer = Trainer(
-    model_config=model_config,
-    training_config=training_config
-)
-
-# Train the model
-model, optimizer, best_val_loss = trainer.train()
-```
-
-### Generating Text
-
-Use the `Generator` class to generate text from a trained model:
-
-```python
-from src.generate import Generator
-
-# Create generator with a trained model
-generator = Generator(
-    model=model,  # Your trained model
-    model_config=model_config,
-    training_config=training_config
-)
-
-# Generate text
-generated_text = generator.generate(
-    prompt="Once upon a time",
-    max_tokens=100,
-    temperature=0.8,
-    top_k=40,
-    top_p=0.9,
-    repetition_penalty=1.0,
-    stop_tokens=['.', '!', '?']
-)
-```
-
-### Saving and Loading Models
-
-The GPT model includes built-in methods for saving and loading:
-
-```python
-# Save a model
-model.save(optimizer, training_config)
-
-# Load a model
-model, optimizer = GPT.load(model_config, training_config)
-```
-
-See `src/save_model.py` for complete examples of training, saving, loading, and generating text.
-
-## Configuration
-
-### Model Configuration
-
-Configure the model architecture in `src/config/model_config.py`:
-
-- Vocabulary size
-- Block size (context length)
-- Number of layers
-- Number of heads
-- Embedding dimension
-- Dropout rate
-
-### Training Configuration
-
-Set training parameters in `src/config/training_config.py`:
-
-- Batch size
-- Learning rate
-- Number of iterations
-- Evaluation interval
-- Gradient clipping
-- Mixed precision training
-- Distributed training settings
-
-## Distributed Training
-
-To enable distributed training:
-
-1. Set `ddp=True` in `TrainingConfig`
-2. Run the training script with:
-
-```bash
-torchrun --nproc_per_node=N src/train.py
-```
-
-where N is the number of GPUs to use.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Preparing and loading custom data
+2. Training the model
+3. Saving and loading checkpoints
+4. Generating text
 
 ## License
 
