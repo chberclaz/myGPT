@@ -1,115 +1,201 @@
-# NanoGPT-Trader
+# GPT-Powered Bitcoin Trading Bot
 
-A GPT implementation optimized for trading applications, based on the nanoGPT architecture.
+A sophisticated Bitcoin trading bot that combines GPT-based price predictions with technical analysis to generate trading signals.
+
+## Features
+
+- **GPT Model Integration**: Uses a transformer-based model trained on historical Bitcoin price data
+- **Technical Analysis**: Incorporates multiple technical indicators:
+  - Relative Strength Index (RSI)
+  - Moving Average Convergence Divergence (MACD)
+  - Bollinger Bands
+  - Simple Moving Averages (20 and 50 periods)
+  - Average True Range (ATR)
+- **Real-time Data**: Fetches live Bitcoin price data from major exchanges
+- **Hybrid Decision Making**: Combines AI predictions with traditional technical analysis
+- **Detailed Logging**: Comprehensive logging of trading signals and model predictions
+- **Configurable Parameters**: Easily adjustable trading and model parameters
 
 ## Installation
 
-You can install the package directly from the repository:
+1. Clone the repository:
 
 ```bash
-pip install git+https://github.com/chberclaz/trader.git
+git clone <repository-url>
+cd nanoGPT
 ```
 
-Or for development:
+2. Install dependencies:
 
 ```bash
-git clone https://github.com/chberclaz/trader.git
-cd nanogpt-trader
-pip install -e .
+pip install -r requirements.txt
 ```
 
-## Quick Start
+Required dependencies:
 
-```python
-from src import GPT, Trainer, Generator, DataManager
-from src import ModelConfig, TrainingConfig
-
-# Create configurations
-model_config = ModelConfig(
-    vocab_size=50257,
-    block_size=256,
-    n_layer=6,
-    n_head=6,
-    n_embd=384,
-    dataset='custom'
-)
-
-training_config = TrainingConfig(
-    batch_size=16,
-    learning_rate=3e-4,
-    max_iters=8000,
-    eval_interval=800,
-    eval_iters=800,
-    warmup_iters=100,
-    lr_decay_iters=5000,
-    min_lr=3e-5,
-    out_dir='out/custom_model',
-    device='cuda' if torch.cuda.is_available() else 'cpu',
-    dataset='custom'
-)
-
-# Initialize data manager and prepare data
-data_manager = DataManager(training_config)
-train_data, val_data = data_manager.prepare_data(text_file='path/to/your/data.txt')
-
-# Create trainer and train model
-trainer = Trainer(
-    model_config=model_config,
-    training_config=training_config,
-    train_data=train_data,
-    val_data=val_data
-)
-model, optimizer, best_val_loss = trainer.train()
-
-# Generate text
-generator = Generator(model=model, model_config=model_config, training_config=training_config)
-generated_text = generator.generate(
-    prompt="Your prompt here",
-    max_tokens=100,
-    temperature=0.8
-)
-print(generated_text)
-```
+- PyTorch
+- ccxt (for exchange data)
+- pandas
+- numpy
+- tiktoken
 
 ## Project Structure
 
 ```
-nanogpt-trader/
-├── src/                    # Main package directory
-│   ├── __init__.py        # Package initialization
-│   ├── models/            # Model implementations
-│   ├── config/            # Configuration classes
-│   ├── data/              # Data loading and processing
-│   ├── utils/             # Utility functions
-│   └── generate.py        # Text generation
-├── tests/                 # Test files
-├── docs/                  # Documentation
-├── data/                  # Data directory (gitignored)
-├── custom_dataset_example.py  # Example usage script
-├── requirements.txt       # Package dependencies
-├── setup.py              # Package setup file
-└── README.md             # This file
+src/
+├── models/          # GPT model implementation
+├── config/          # Configuration classes
+├── data/
+│   └── price_tokenizer.py  # Price data tokenization
+└── trading/
+    ├── data_fetcher.py     # Bitcoin price data fetching
+    ├── indicators.py       # Technical analysis indicators
+    ├── trading_bot.py     # Main trading bot implementation
+    ├── train_trading_model.py  # Model training script
+    └── run_trading_bot.py  # Bot execution script
 ```
 
-## Features
+## Usage
 
-- Efficient GPT implementation
-- Custom dataset support
-- Configurable model architecture
-- Training with gradient accumulation
-- Text generation with various parameters
-- Checkpoint saving and loading
-- Device (CPU/GPU) support
+### 1. Training the Model
 
-## Example Scripts
+Train the GPT model on historical Bitcoin price data:
 
-Check `custom_dataset_example.py` for a complete example of:
+```bash
+python -m src.trading.train_trading_model
+```
 
-1. Preparing and loading custom data
-2. Training the model
-3. Saving and loading checkpoints
-4. Generating text
+Configuration options in `train_trading_model.py`:
+
+- Model architecture (layers, heads, embedding size)
+- Training parameters (batch size, learning rate, epochs)
+- Price tokenization range and resolution
+
+### 2. Running the Trading Bot
+
+Run the bot with a trained model:
+
+```bash
+python -m src.trading.run_trading_bot --checkpoint path/to/model.pt
+```
+
+Command-line options:
+
+- `--checkpoint`: Path to trained model checkpoint (required)
+- `--interval`: Time between predictions in seconds (default: 3600)
+- `--output-dir`: Directory for saving trading signals (default: trading_signals)
+- `--device`: Device to run model on (default: cuda if available, else cpu)
+
+### Trading Signal Output
+
+The bot generates JSON files containing trading signals with:
+
+- Action (buy/sell/hold)
+- Confidence level
+- Current price
+- Predicted price
+- Technical indicators
+- Reasoning for the decision
+
+Example signal:
+
+```json
+{
+  "action": "buy",
+  "confidence": 0.85,
+  "price": 45000.0,
+  "timestamp": "2024-03-21T14:30:00",
+  "gpt_prediction": 46500.0,
+  "indicators": {
+    "rsi": 35.2,
+    "macd": 120.5,
+    "macd_signal": 100.2,
+    "macd_hist": 20.3,
+    "sma_20": 44800.0,
+    "sma_50": 43500.0,
+    "upper_band": 46000.0,
+    "lower_band": 43000.0,
+    "atr": 800.0
+  },
+  "reason": "GPT and technicals agree: RSI oversold | MACD bullish crossover"
+}
+```
+
+## Model Architecture
+
+The system uses a GPT (Generative Pre-trained Transformer) model adapted for price prediction:
+
+- Input: Sequence of tokenized prices with technical indicators
+- Output: Predicted future price movements
+- Features:
+  - Price and volume data
+  - Normalized technical indicators
+  - Temporal patterns
+
+## Trading Strategy
+
+The bot combines two approaches:
+
+1. **GPT Predictions**: Price movement forecasting using the trained model
+2. **Technical Analysis**: Traditional indicator-based signals
+
+Decision making:
+
+- Strong agreement between GPT and technicals → Higher confidence
+- Significant GPT prediction (>5% change) → Favor GPT signal
+- Minimal predicted change (<1%) → Hold position
+- Otherwise → Follow stronger signal with moderate confidence
+
+## Customization
+
+### Price Tokenizer
+
+Adjust in `src/data/price_tokenizer.py`:
+
+- Price range (`min_price`, `max_price`)
+- Number of price bins (`n_bins`)
+
+### Model Configuration
+
+Modify in `src/trading/train_trading_model.py`:
+
+- Model architecture parameters
+- Training hyperparameters
+- Sequence length and prediction horizon
+
+### Trading Parameters
+
+Update in `src/trading/trading_bot.py`:
+
+- Technical indicator thresholds
+- Confidence calculation
+- Signal combination logic
+
+## Logging
+
+The bot maintains two types of logs:
+
+1. Console/file logging of operations and errors
+2. Detailed JSON files of trading signals
+
+Logs are saved in:
+
+- `trading_bot.log`: Operation logs
+- `trading_signals/`: Individual signal JSON files
+
+## Warning
+
+This is an experimental trading bot. Use at your own risk. Always:
+
+- Test thoroughly with small amounts
+- Monitor the bot's performance
+- Understand the risks involved
+- Consider market conditions
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+[Your License Here]
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
