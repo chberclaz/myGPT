@@ -1,19 +1,19 @@
-# NanoGPT-Trader
+# MyGPT
 
-A GPT implementation optimized for trading applications, based on the nanoGPT architecture.
+A GPT implementation optimized, based on the nanoGPT architecture. Continuation of myPT Project
 
 ## Installation
 
 You can install the package directly from the repository:
 
 ```bash
-pip install git+https://github.com/chberclaz/trader.git
+pip install git+https://github.com/chberclaz/myGPT.git
 ```
 
 Or for development:
 
 ```bash
-git clone https://github.com/chberclaz/trader.git
+git clone https://github.com/chberclaz/myGPT.git
 cd nanogpt-trader
 pip install -e .
 ```
